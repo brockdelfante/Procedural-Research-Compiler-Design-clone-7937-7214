@@ -2,18 +2,23 @@ import { callLLM } from '../api';
 import { systemLog } from '../logger';
 
 async function validateAndFixEntities(parsed, originalQuery) {
-  const validationPrompt = `FIX research entity clustering AND ENFORCE BALANCE:
+  const validationPrompt = `You are validating a research decomposition. Check and fix the following:
+
 ORIGINAL QUERY: "${originalQuery}"
-CURRENT: ${JSON.stringify(parsed)}
+CURRENT DECOMPOSITION: ${JSON.stringify(parsed)}
 
-TASK:
-1. Remove CONTEXT TERMS (AI/ML/tech) from entities → add to core_task
-2. **ENFORCE EXACTLY 2-3 questions PER TARGET ENTITY** (no exceptions)
-3. Re-generate missing sub-questions for any entity with fewer than 2
-4. Every entity must have equal coverage
+RULES TO ENFORCE:
+1. core_task must be the SUBJECT CONSTANT — the single thing being researched (e.g. "ways AI is being used", "STRA approval requirements"). It must NOT be one of the entities.
+2. entities[] must be the DIMENSIONS — the list of things being compared or iterated over (e.g. industries, jurisdictions, companies). Do NOT put the subject in entities[].
+3. Every entity must have EXACTLY 2-3 sub-questions.
+4. CRITICAL: Every sub-question must explicitly reference the subject constant (core_task). A sub-question that does not mention or clearly imply the subject is WRONG and must be rewritten.
+   - If core_task is "ways AI is being used", every question must mention AI.
+   - If core_task is "STRA approval requirements", every question must reference STRA or approval requirements.
+5. Each sub-question must also be specific to its entity (not generic).
+6. Think of each sub-question as: "How does [core_task] apply to [entity]?"
 
-If already perfect (every entity has 2-3 questions): {"valid": true}
-Else: return COMPLETE corrected JSON with the same schema`;
+If everything is already correct: {"valid": true}
+Otherwise: return the COMPLETE corrected JSON using the same schema.`;
 
   try {
     const fixResult = await callLLM(validationPrompt, "", true);
@@ -44,23 +49,48 @@ function checkBalance(parsed) {
 export async function translateQuery(query) {
   systemLog.info("PART 1: Translator (Semantic Clustering + Entity Isolation)");
 
-  const systemPrompt = `You are a Semantic Research Planner. Decompose research queries into isolated target entities using clustering logic.
+  const systemPrompt = `You are a Research Decomposition Agent. Your job is to split a research question into a SUBJECT CONSTANT and a set of DIMENSIONS, then generate sub-questions that are the intersection of both.
 
-PHASE 1 - SEMANTIC CLUSTERING:
-1. Extract ALL candidate terms from the query.
-2. Group by SIMILAR NATURE (industries, locations, companies form TARGET clusters).
-3. ISOLATED TERMS (technologies, methods like AI/ML) = CONTEXT, not entities.
-4. Only TARGET CLUSTER becomes the entities[] array.
+STEP 1 — IDENTIFY THE SUBJECT CONSTANT (core_task):
+Ask: "What is the single thing this question wants to understand?"
+This is constant — it must appear in every sub-question.
+It is NOT one of the things being compared. It is the lens.
+Store this in core_task.
 
-PHASE 2 - PER-ENTITY SUB-QUESTIONS:
-- Generate EXACTLY 2-3 focused sub-questions PER TARGET ENTITY.
-- Each sub-question targets ONE entity + the research context.
-- Every entity MUST have its own entry in sub_questions with 2-3 questions.
+STEP 2 — IDENTIFY THE DIMENSIONS (entities):
+Ask: "What is being compared or enumerated? What do I loop over?"
+These become entities[]. They are the independent variables.
+Do NOT put the subject in entities[].
+
+STEP 3 — GENERATE SUB-QUESTIONS (subject × entity):
+For each entity, generate EXACTLY 2-3 sub-questions where:
+- EVERY question must explicitly reference the subject constant
+- EVERY question must be specific to that entity
+- Frame each as: "How does [subject] apply to [entity]?"
+
+WORKED EXAMPLES:
+
+Query: "Research the way AI is being used in mortgage brokering, lending and capital raising"
+core_task: "ways AI is being used"
+entities: [Mortgage Brokering, Lending, Capital Raising]
+✅ CORRECT sub-questions:
+  - "What AI tools are being used for risk assessment in mortgage brokering?"
+  - "How is AI automating loan approval decisions in lending?"
+  - "In what ways is AI being used to identify investors in capital raising?"
+❌ WRONG (subject missing):
+  - "How is the mortgage application process being streamlined?" ← no mention of AI
+  - "What role does fraud detection play in lending?" ← no mention of AI
+
+Query: "Compare STRA approval requirements in City of Stirling, City of Perth and Mosman Park"
+core_task: "STRA development approval requirements"
+entities: [City of Stirling, City of Perth, Mosman Park]
+✅ CORRECT: "What are the STRA approval conditions for short-term rentals in the City of Stirling?"
+❌ WRONG: "What development applications are common in the City of Stirling?" ← subject missing
 
 REQUIRED JSON OUTPUT:
-{"core_task": "Researching [CONTEXT] within specific sectors", "entities": [{"name": "Entity Name", "domain": "Optional", "synonyms": []}], "sub_questions": [{"entity": "Entity Name", "questions": ["Q1", "Q2", "Q3"]}]}
+{"core_task": "[subject constant]", "entities": [{"name": "Entity Name", "domain": "Optional", "synonyms": []}], "sub_questions": [{"entity": "Entity Name", "questions": ["Q1 referencing subject", "Q2 referencing subject"]}]}
 
-CRITICAL: Return ONLY valid JSON. Every entity in entities[] MUST have a matching entry in sub_questions[] with 2-3 questions.`;
+CRITICAL: Return ONLY valid JSON. Every sub-question MUST reference the subject constant (core_task).`;
 
   const MAX_ATTEMPTS = 3;
 
@@ -86,13 +116,12 @@ CRITICAL: Return ONLY valid JSON. Every entity in entities[] MUST have a matchin
       }
 
       systemLog.info(`Research question: "${query}"`);
-      systemLog.info(`Context identified: ${parsed.core_task}`);
-      systemLog.info(
-        `Entities found: ${parsed.entities.map(e => {
-          const syns = e.synonyms?.length ? ` (also: ${e.synonyms.slice(0, 3).join(', ')})` : '';
-          return e.name + syns;
-        }).join(' | ')}`
-      );
+      systemLog.info(`Subject constant: ${parsed.core_task}`);
+      systemLog.info(`Dimensions (entities): ${parsed.entities.map(e => e.name).join(', ')}`);
+      parsed.entities.forEach(e => {
+        const syns = e.synonyms?.length ? ` (also: ${e.synonyms.slice(0, 3).join(', ')})` : '';
+        systemLog.info(`  Entity: ${e.name}${syns}`);
+      });
       for (const sq of parsed.sub_questions) {
         sq.questions.forEach((q, i) => {
           systemLog.info(`  [${sq.entity}] Q${i + 1}: ${q}`);
