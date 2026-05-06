@@ -17,16 +17,16 @@ const TIER_NAMES = {
   4: 'Contextual Policy'
 };
 
-const MIN_AUTHORITY_HITS = 3;
-const MIN_SOURCES_PER_ENTITY = 6;
+// Minimum authority sources to consider a sub-question adequately covered by Tier 0
+const MIN_AUTHORITY_HITS_PER_QUESTION = 2;
+// Maximum total sources to collect per sub-question across all tiers
+const MAX_SOURCES_PER_QUESTION = 4;
 
+// Tier 0 templates are question-specific so searches are targeted to each sub-question
 const AUTHORITY_QUERY_TEMPLATES = [
-  (coreTask, entity) => `"${entity}" ${coreTask} filetype:pdf site:.gov.au`,
-  (coreTask, entity) => `"${entity}" ${coreTask} filetype:pdf site:.edu.au`,
-  (coreTask, entity) => `"${entity}" ${coreTask} AND report site:.gov.au`,
-  (coreTask, entity) => `"${entity}" ${coreTask} AND guide site:.gov.au`,
-  (coreTask, entity) => `"${entity}" ${coreTask} filetype:pdf AND policy site:.gov.au`,
-  (coreTask, entity) => `"${entity}" ${coreTask} AND evaluation site:.gov.au`
+  (entity, question) => `"${entity}" ${question} filetype:pdf site:.gov.au`,
+  (entity, question) => `"${entity}" ${question} filetype:pdf site:.edu.au`,
+  (entity, question) => `"${entity}" ${question} site:.gov.au`,
 ];
 
 function generateQueries(tier, entity, coreTask, question) {
@@ -50,137 +50,117 @@ function generateQueries(tier, entity, coreTask, question) {
   return [...new Set(queries)];
 }
 
+async function researchSubQuestion(entity, question, coreTask, uniqueSources, onProgress) {
+  let sourcesCount = 0;
+  let authorityHits = 0;
+  let accumulatedKnowledge = "";
+
+  // --- TIER 0: Authority-first searches scoped to this sub-question ---
+  onProgress(`Tier 0 (Authority): ${entity.name} — ${question.slice(0, 50)}…`);
+  systemLog.info(`  [Tier 0 – ${TIER_NAMES[0]}] Authority searches for: "${question}"`);
+
+  for (const template of AUTHORITY_QUERY_TEMPLATES) {
+    if (sourcesCount >= MAX_SOURCES_PER_QUESTION) break;
+    const query = template(entity.name, question);
+    systemLog.info(`  [Tier 0 – ${TIER_NAMES[0]}] Search: ${query}`);
+
+    try {
+      const results = await searchTavily(query);
+      systemLog.info(`    → ${results.length} results returned`);
+
+      for (const result of results.slice(0, 2)) {
+        if (uniqueSources.has(result.url)) continue;
+        const { content, evaluation } = await extractData(result.url, question, sourcesCount);
+
+        if (content && (evaluation.sufficient || evaluation.score >= 6)) {
+          authorityHits++;
+          sourcesCount++;
+          uniqueSources.set(result.url, { title: result.title, url: result.url, isAuthority: true });
+          accumulatedKnowledge += `\n\n${content}`;
+          systemLog.info(`    ✅ Authority hit [${authorityHits}]: ${(result.title || '').slice(0, 70)}`);
+        }
+      }
+    } catch (e) {
+      systemLog.error(`Tier 0 error`, e.message);
+    }
+  }
+
+  // --- Decision: was Tier 0 sufficient? ---
+  if (authorityHits >= MIN_AUTHORITY_HITS_PER_QUESTION) {
+    systemLog.info(`    ✅ Sufficient authority coverage (${authorityHits} hits) — skipping Tiers 1–4`);
+    return { knowledge: accumulatedKnowledge, hasAuthority: true };
+  }
+
+  systemLog.info(`    ⚠️ Only ${authorityHits} authority hit(s) — activating Tiers 1–4`);
+
+  // --- TIERS 1–4: Fallback for this sub-question ---
+  for (let tier = 1; tier <= 4; tier++) {
+    if (sourcesCount >= MAX_SOURCES_PER_QUESTION) break;
+    onProgress(`Tier ${tier} Search: ${entity.name} (${sourcesCount} sources)`);
+
+    const queries = generateQueries(tier, entity, coreTask, question);
+    for (const query of queries) {
+      if (sourcesCount >= MAX_SOURCES_PER_QUESTION) break;
+      systemLog.info(`  [Tier ${tier} – ${TIER_NAMES[tier] || 'Custom'}] Search: ${query}`);
+
+      try {
+        const results = await searchTavily(query);
+        systemLog.info(`    → ${results.length} results returned`);
+
+        for (const result of results.slice(0, 2)) {
+          if (uniqueSources.has(result.url)) continue;
+          const { content } = await extractData(result.url, question, sourcesCount);
+          if (content) {
+            accumulatedKnowledge += `\n\n${content}`;
+            uniqueSources.set(result.url, { title: result.title, url: result.url, isAuthority: false });
+            sourcesCount++;
+          }
+        }
+      } catch (e) {
+        systemLog.error(`Tier ${tier} error`, e.message);
+      }
+    }
+  }
+
+  return { knowledge: accumulatedKnowledge, hasAuthority: authorityHits > 0 };
+}
+
 export async function executePlan(plan, onProgress) {
   systemLog.info("PART 2: Authority-First Matrix Executor");
   const localDatabase = [];
   const uniqueSources = new Map();
 
   for (const entity of plan.entities) {
-    // ADDED: console.log RAW at start of entity loop
-    console.log("🔄 PROCESSING RAW:", JSON.stringify(entity, null, 2));
+    systemLog.info(`Processing entity: ${entity.name}`);
 
-    let entitySourcesCount = 0;
-    let authorityHits = 0;
+    const sqGroup = plan.sub_questions.find(sq => sq.entity === entity.name);
+    if (!sqGroup || !sqGroup.questions.length) {
+      systemLog.warn(`No sub-questions found for entity: ${entity.name} — skipping`);
+      continue;
+    }
 
-    systemLog.info(`🏛️ TIER 0: Authority-First for ${entity.name}`);
-    onProgress(`Tier 0 (Authority): ${entity.name}`);
+    for (const question of sqGroup.questions) {
+      systemLog.info(`  Sub-question: ${question}`);
 
-    for (const template of AUTHORITY_QUERY_TEMPLATES) {
-      const query = template(plan.core_task, entity.name);
-      
-      // REPLACED: Tier 0 systemLog with console.log RAW
-      console.log("🔍 SEARCH DETAILS RAW:", JSON.stringify({
-        entity: entity.name,
-        tier: `0 (${TIER_NAMES[0]})`,
-        fullQuery: query,
-        queryType: 'AUTHORITY',
-        expectedResults: 'Top 3 per query'
-      }, null, 2));
+      const { knowledge, hasAuthority } = await researchSubQuestion(
+        entity, question, plan.core_task, uniqueSources, onProgress
+      );
 
-      try {
-        const results = await searchTavily(query);
-        
-        systemLog.info("📄 SEARCH RESULTS", {
-          hits: results.length,
-          top3: results.slice(0, 3).map(r => ({
-            title: (r.title || 'No title').slice(0, 60) + '...',
-            url: r.url,
-            authority: r.url?.includes('.gov') || r.url?.includes('.edu') ? 'YES' : 'NO'
-          })),
-          fetching: results.slice(0, 2).map(r => r.url)
+      if (knowledge) {
+        localDatabase.push({
+          entity: entity.name,
+          question,
+          answer: knowledge,
+          isAuthority: hasAuthority,
+          timestamp: new Date().toISOString()
         });
-
-        for (const result of results.slice(0, 2)) {
-          if (uniqueSources.has(result.url)) continue;
-          const { content, evaluation } = await extractData(result.url, "General authority overview", entitySourcesCount);
-          
-          if (content && (evaluation.sufficient || evaluation.score >= 6)) {
-            authorityHits++;
-            entitySourcesCount++;
-            uniqueSources.set(result.url, { title: result.title, url: result.url, isAuthority: true });
-            localDatabase.push({
-              entity: entity.name,
-              question: "Authority Overview",
-              answer: content,
-              isAuthority: true,
-              timestamp: new Date().toISOString()
-            });
-            systemLog.info(`✅ Authority hit [${authorityHits}/12]: ${result.title}`);
-          }
-        }
-      } catch (e) {
-        systemLog.error(`Tier 0 error`, e);
+      } else {
+        systemLog.warn(`  No content gathered for: "${question}"`);
       }
     }
 
-    if (authorityHits < MIN_AUTHORITY_HITS) {
-      systemLog.info("🧠 Low authority coverage → Activating Tiers 1-4");
-      for (const sqGroup of plan.sub_questions) {
-        if (sqGroup.entity !== entity.name) continue;
-
-        for (const question of sqGroup.questions) {
-          let accumulatedKnowledge = "";
-          let questionSourcesCount = 0;
-
-          for (let tier = 1; tier <= 4; tier++) {
-            if (entitySourcesCount >= MIN_SOURCES_PER_ENTITY && tier > 2) break;
-            onProgress(`T${tier} Search: ${entity.name} (${entitySourcesCount} sources)`);
-            
-            const queries = generateQueries(tier, entity, plan.core_task, question);
-            for (const query of queries) {
-              if (questionSourcesCount >= 3) break;
-
-              systemLog.info("🔍 SEARCH DETAILS", {
-                entity: entity.name || entity,
-                tier: `${tier} (${TIER_NAMES[tier] || 'Custom'})`,
-                fullQuery: query,
-                queryType: 'NORMAL',
-                expectedResults: 'Top 3 per query'
-              });
-
-              try {
-                const results = await searchTavily(query);
-
-                systemLog.info("📄 SEARCH RESULTS", {
-                  hits: results.length,
-                  top3: results.slice(0, 3).map(r => ({
-                    title: (r.title || 'No title').slice(0, 60) + '...',
-                    url: r.url,
-                    authority: r.url?.includes('.gov') || r.url?.includes('.edu') ? 'YES' : 'NO'
-                  })),
-                  fetching: results.slice(0, 2).map(r => r.url)
-                });
-
-                for (const result of results.slice(0, 2)) {
-                  if (uniqueSources.has(result.url)) continue;
-                  const { content } = await extractData(result.url, question, entitySourcesCount);
-                  if (content) {
-                    accumulatedKnowledge += `\n\n${content}`;
-                    uniqueSources.set(result.url, { title: result.title, url: result.url, isAuthority: false });
-                    entitySourcesCount++;
-                    questionSourcesCount++;
-                  }
-                }
-              } catch (e) {
-                systemLog.error(`Tier ${tier} error`, e);
-              }
-            }
-          }
-          if (accumulatedKnowledge) {
-            localDatabase.push({
-              entity: entity.name,
-              question: question,
-              answer: accumulatedKnowledge,
-              isAuthority: false,
-              timestamp: new Date().toISOString()
-            });
-          }
-        }
-      }
-    } else {
-      systemLog.info(`✅ Sufficient authority coverage - skipping Tier 1-4 for ${entity.name}`);
-    }
     PersistenceService.save(localDatabase);
+    systemLog.info(`Entity complete: ${entity.name} (${localDatabase.filter(d => d.entity === entity.name).length} entries in database)`);
   }
 
   return { database: localDatabase, sources: Array.from(uniqueSources.values()) };
