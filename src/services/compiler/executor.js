@@ -56,8 +56,7 @@ export async function executePlan(plan, onProgress) {
   const uniqueSources = new Map();
 
   for (const entity of plan.entities) {
-    // ADDED: console.log RAW at start of entity loop
-    console.log("🔄 PROCESSING RAW:", JSON.stringify(entity, null, 2));
+    systemLog.info(`Processing entity: ${entity.name}`);
 
     let entitySourcesCount = 0;
     let authorityHits = 0;
@@ -68,14 +67,7 @@ export async function executePlan(plan, onProgress) {
     for (const template of AUTHORITY_QUERY_TEMPLATES) {
       const query = template(plan.core_task, entity.name);
       
-      // REPLACED: Tier 0 systemLog with console.log RAW
-      console.log("🔍 SEARCH DETAILS RAW:", JSON.stringify({
-        entity: entity.name,
-        tier: `0 (${TIER_NAMES[0]})`,
-        fullQuery: query,
-        queryType: 'AUTHORITY',
-        expectedResults: 'Top 3 per query'
-      }, null, 2));
+      systemLog.info(`  [Tier 0 – ${TIER_NAMES[0]}] Search: ${query}`);
 
       try {
         const results = await searchTavily(query);
@@ -130,13 +122,7 @@ export async function executePlan(plan, onProgress) {
             for (const query of queries) {
               if (questionSourcesCount >= 3) break;
 
-              systemLog.info("🔍 SEARCH DETAILS", {
-                entity: entity.name || entity,
-                tier: `${tier} (${TIER_NAMES[tier] || 'Custom'})`,
-                fullQuery: query,
-                queryType: 'NORMAL',
-                expectedResults: 'Top 3 per query'
-              });
+              systemLog.info(`  [Tier ${tier} – ${TIER_NAMES[tier] || 'Custom'}] Search: ${query}`);
 
               try {
                 const results = await searchTavily(query);

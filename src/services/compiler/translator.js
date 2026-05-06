@@ -62,22 +62,19 @@ CRITICAL: Return ONLY valid JSON.`;
     // AUTO-FIX & BALANCE: Apply self-healing layer
     parsed = await validateAndFixEntities(parsed, query);
 
-    // REPLACED: systemLog with console.log RAW as requested
-    console.log("📋 COMPLETE RESEARCH PLAN RAW:", JSON.stringify({
-      originalQuery: query,
-      coreTask: parsed.core_task,
-      entities: parsed.entities.map((e, i) => ({
-        id: i + 1,
-        name: e.name,
-        synonyms: e.synonyms?.slice(0, 3) || []
-      })),
-      subQuestions: parsed.sub_questions.map((sq, i) => ({
-        id: i + 1,
-        entity: sq.entity,
-        questionCount: sq.questions?.length || 0,
-        questions: sq.questions || []
-      }))
-    }, null, 2));
+    systemLog.info(`Research question: "${query}"`);
+    systemLog.info(`Context identified: ${parsed.core_task}`);
+    systemLog.info(
+      `Entities found: ${parsed.entities.map(e => {
+        const syns = e.synonyms?.length ? ` (also: ${e.synonyms.slice(0, 3).join(', ')})` : '';
+        return e.name + syns;
+      }).join(' | ')}`
+    );
+    for (const sq of parsed.sub_questions) {
+      sq.questions.forEach((q, i) => {
+        systemLog.info(`  [${sq.entity}] Q${i + 1}: ${q}`);
+      });
+    }
 
     // SUB-QUESTION BALANCE ENFORCEMENT
     const MIN_QUESTIONS_PER_ENTITY = 2;
