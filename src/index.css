@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #0a0a0a;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* Custom styling for markdown tables */
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.prose th {
+  background-color: #171717;
+  border: 1px solid #262626;
+  padding: 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  color: #d4d4d4;
+}
+
+.prose td {
+  border: 1px solid #262626;
+  padding: 0.75rem;
+  color: #a3a3a3;
+  vertical-align: top;
+}
+
+.prose tr:nth-child(even) {
+  background-color: #0f0f0f;
+}
