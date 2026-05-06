@@ -8,78 +8,101 @@ export async function generateProfessionalReport(rawData, sources) {
     return { markdown: "No research data found.", sources: [] };
   }
 
-  const entityCounts = rawData.reduce((acc, entry) => {
-    acc[entry.entity] = (acc[entry.entity] || 0) + 1;
-    return acc;
-  }, {});
+  // Derive structure from the database
+  const entities = [...new Set(rawData.map(d => d.entity))];
+  // Exclude the generic authority overview entries from sub-question count
+  const subQuestions = [...new Set(rawData.filter(d => d.question !== 'Authority Overview').map(d => d.question))];
 
-  const entities = Object.keys(entityCounts);
+  // Dynamic minimum: whichever rule produces the largest number wins
+  const minFromSubQuestions = subQuestions.length * 200;
+  const minFromEntities = entities.length * 500;
+  const minimumWords = Math.max(1000, minFromSubQuestions, minFromEntities);
 
   systemLog.info("📊 SYNTHESIS INPUT", {
-    totalEntries: rawData.length,
-    entitiesCovered: entities.length,
-    entriesPerEntity: entityCounts,
-    totalSources: sources?.length || 0,
-    authoritySources: (sources || []).filter(s => s.isAuthority || s.url?.includes('.gov') || s.url?.includes('.edu')).length
+    entities: entities.length,
+    subQuestions: subQuestions.length,
+    sources: sources?.length || 0,
+    minimumWords,
+    authoritySources: (sources || []).filter(s => s.isAuthority).length
   });
 
-  const authoritySources = sources.filter(s => s.isAuthority);
-  const generalSources = sources.filter(s => !s.isAuthority);
+  // Number every source sequentially — no A/G split, just [1]…[N]
+  const numberedSources = (sources || []).map((s, i) => ({
+    ...s,
+    ref: i + 1,
+    label: `[${i + 1}] ${s.title || 'Untitled'} — ${s.url}${s.isAuthority ? ' (Authority)' : ''}`
+  }));
 
-  // Build one section definition per entity so the LLM knows exactly what to produce
-  const entitySections = entities.map(name => `## ${name} Deep Dive
-### Key Findings (authority sources first)
-### Tools & Strategies
-### Quantitative Metrics (%, $, targets, timelines)
-### Implementation Challenges`).join('\n\n');
+  const sourceList = numberedSources.map(s => s.label).join('\n');
+
+  // Build per-entity section scaffold with sub-questions listed
+  const entitySections = entities.map(name => {
+    const sqs = rawData.filter(d => d.entity === name && d.question !== 'Authority Overview').map(d => d.question);
+    const sqList = [...new Set(sqs)].map(q => `  - ${q}`).join('\n');
+    return `## ${name} (minimum 500 words)\n${sqList ? `Sub-questions covered:\n${sqList}` : ''}
+### Key Findings
+### Strategies & Approaches
+### Quantitative Data & Metrics
+### Challenges & Gaps`;
+  }).join('\n\n');
 
   const entityRequirements = entities.map((name, i) =>
-    `${i + 1}. ${name}: minimum 200 words, at least one inline citation, quantitative data required`
+    `${i + 1}. ${name} — minimum 500 words, cite every relevant source`
   ).join('\n');
 
-  const detailedPrompt = `Generate a COMPREHENSIVE executive report from this research data.
+  const detailedPrompt = `You are writing a professional research report. Your job is to synthesize the research data below into a comprehensive, well-cited report.
 
-ENTITIES TO COVER (you MUST cover every one with equal depth):
+SOURCES (${numberedSources.length} total — use the reference number [N] for all in-text citations):
+${sourceList}
+
+CITATION RULES:
+- Every factual claim, finding, or piece of data MUST have an in-text citation immediately after it, e.g. "Companies are using AI for fraud detection [3][7]."
+- Use the majority of the ${numberedSources.length} sources — only omit a source if it is genuinely irrelevant to any finding
+- A source can be cited multiple times if relevant in multiple places
+- The Full References section at the end must list every cited source as a numbered list matching the in-text numbers
+
+ENTITIES TO COVER (you MUST cover every one in full):
 ${entityRequirements}
-
-AUTHORITY SOURCES (double weight — cite these first):
-${authoritySources.map((s, i) => `[A${i + 1}] ${s.title} (${s.url})`).join('\n') || 'None'}
-
-GENERAL SOURCES:
-${generalSources.map((s, i) => `[G${i + 1}] ${s.title} (${s.url})`).join('\n') || 'None'}
 
 RESEARCH DATA:
 ${JSON.stringify(rawData, null, 2)}
 
-REQUIREMENTS:
-- MINIMUM 1000 words total
-- Every entity listed above MUST have its own Deep Dive section of at least 200 words
-- Do NOT omit or abbreviate any entity's section — missing an entity is a critical failure
-- Use inline citations [A1], [G1] etc. throughout
-- Include quantitative metrics (%, $, targets, dates) wherever the data supports it
-- Use GFM tables for side-by-side entity comparisons
-- End with a Data Gaps section and a Full Source Index
+WORD COUNT REQUIREMENTS:
+- Minimum ${minimumWords} words total (calculated from: ${subQuestions.length} sub-questions × 200 = ${minFromSubQuestions} words; ${entities.length} entities × 500 = ${minFromEntities} words; floor of 1000)
+- Minimum 200 words per sub-question addressed
+- Minimum 500 words per entity section
+- Do NOT pad with filler — if you reach the minimum, keep going with substance
 
-REQUIRED STRUCTURE (do not deviate — use the exact entity names below):
+REQUIRED STRUCTURE:
 # [Report Title]
-## Executive Summary (approx 250 words — synthesise all ${entities.length} entities)
-${entitySections}
-## Comparison Analysis
-| Entity | [Key Metric A] | [Key Metric B] | Primary Sources |
-|--------|----------------|----------------|-----------------|
-${entities.map(e => `| ${e} | | | |`).join('\n')}
-## Data Gaps & Future Research Needs
-## Full Source Index
+## Executive Summary
+Synthesise the key findings across all ${entities.length} entities. Include cross-entity comparisons and the most significant cited evidence. (~250 words minimum)
 
-Return ONLY the Markdown report.`;
+${entitySections}
+
+## Comparative Analysis
+A GFM table comparing all entities across the key metrics found in the data. Every cell must contain real data or "Not found".
+| Entity | [Metric A] | [Metric B] | [Metric C] | Key Sources |
+|--------|------------|------------|------------|-------------|
+${entities.map(e => `| ${e} | | | | |`).join('\n')}
+
+## Data Gaps & Limitations
+What was missing, unclear, or could not be verified from the sources.
+
+## References
+A numbered list of every source cited in this report:
+1. [title] — [url]
+2. ...
+
+Return ONLY the Markdown report. No preamble, no commentary.`;
 
   try {
     const markdownReport = await callLLM(
       detailedPrompt,
-      `Synthesize a professional 1000+ word executive report. You MUST include a full Deep Dive section for each of these entities: ${entities.join(', ')}. Missing any entity is unacceptable.`,
+      `Write a ${minimumWords}+ word research report covering all ${entities.length} entities equally: ${entities.join(', ')}. Cite the majority of the ${numberedSources.length} available sources using numbered in-text citations [N].`,
       false
     );
-    systemLog.info(`✅ Report synthesized — entities covered: ${entities.join(', ')}`);
+    systemLog.info(`✅ Report synthesized — ${minimumWords} word minimum, ${numberedSources.length} sources available`);
     return { markdown: markdownReport, sources };
   } catch (error) {
     systemLog.error("❌ Report synthesis failed", error);

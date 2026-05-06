@@ -22,12 +22,15 @@ const MIN_AUTHORITY_HITS_PER_QUESTION = 2;
 // Maximum total sources to collect per sub-question across all tiers
 const MAX_SOURCES_PER_QUESTION = 4;
 
-// Tier 0 templates are question-specific so searches are targeted to each sub-question
-const AUTHORITY_QUERY_TEMPLATES = [
-  (entity, question) => `"${entity}" ${question} filetype:pdf site:.gov.au`,
-  (entity, question) => `"${entity}" ${question} filetype:pdf site:.edu.au`,
-  (entity, question) => `"${entity}" ${question} site:.gov.au`,
+// Tier 0 templates A-C use the entity name; D uses the first synonym (if available)
+const TIER0_ENTITY_TEMPLATES = [
+  (entity, question) => `"${entity}" ${question} filetype:pdf`,
+  (entity, question) => `"${entity}" ${question} site:.gov.au OR site:.edu.au`,
+  (entity, question) => `"${entity}" ${question} "Report"`,
 ];
+
+const TIER0_SYNONYM_TEMPLATE =
+  (synonym, question) => `"${synonym}" ${question} filetype:pdf OR site:.gov.au`;
 
 function generateQueries(tier, entity, coreTask, question) {
   const queries = [];
@@ -59,9 +62,14 @@ async function researchSubQuestion(entity, question, coreTask, uniqueSources, on
   onProgress(`Tier 0 (Authority): ${entity.name} — ${question.slice(0, 50)}…`);
   systemLog.info(`  [Tier 0 – ${TIER_NAMES[0]}] Authority searches for: "${question}"`);
 
-  for (const template of AUTHORITY_QUERY_TEMPLATES) {
+  const firstSynonym = entity.synonyms?.[0];
+  const tier0Queries = [
+    ...TIER0_ENTITY_TEMPLATES.map(t => t(entity.name, question)),
+    ...(firstSynonym ? [TIER0_SYNONYM_TEMPLATE(firstSynonym, question)] : []),
+  ];
+
+  for (const query of tier0Queries) {
     if (sourcesCount >= MAX_SOURCES_PER_QUESTION) break;
-    const query = template(entity.name, question);
     systemLog.info(`  [Tier 0 – ${TIER_NAMES[0]}] Search: ${query}`);
 
     try {
