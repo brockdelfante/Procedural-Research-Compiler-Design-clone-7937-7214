@@ -10,7 +10,7 @@ CURRENT DECOMPOSITION: ${JSON.stringify(parsed)}
 RULES TO ENFORCE:
 1. core_task must be the SUBJECT CONSTANT — the single thing being researched (e.g. "ways AI is being used", "STRA approval requirements"). It must NOT be one of the entities.
 2. entities[] must be the DIMENSIONS — the list of things being compared or iterated over (e.g. industries, jurisdictions, companies). Do NOT put the subject in entities[].
-3. Every entity must have EXACTLY 2-3 sub-questions.
+3. Every entity must have 2-3 sub-questions (2 for narrow topics, 3 for broad ones).
 4. CRITICAL: Every sub-question must explicitly reference the subject constant (core_task). A sub-question that does not mention or clearly imply the subject is WRONG and must be rewritten.
    - If core_task is "ways AI is being used", every question must mention AI.
    - If core_task is "STRA approval requirements", every question must reference STRA or approval requirements.
@@ -63,7 +63,10 @@ These become entities[]. They are the independent variables.
 Do NOT put the subject in entities[].
 
 STEP 3 — GENERATE SUB-QUESTIONS (subject × entity):
-For each entity, generate EXACTLY 2-3 sub-questions where:
+For each entity, generate 2 or 3 sub-questions based on topic breadth:
+- Use 2 sub-questions for narrow, specific topics where 2 questions fully cover the ground
+- Use 3 sub-questions for broad, multi-faceted topics where more territory needs to be covered
+- Apply this judgment per entity — different entities in the same query can have different counts
 - EVERY question must explicitly reference the subject constant
 - EVERY question must be specific to that entity
 - Frame each as: "How does [subject] apply to [entity]?"
