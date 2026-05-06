@@ -9,234 +9,369 @@ import { generateProfessionalReport } from '../services/compiler/synthesizer';
 import { exportToPdf } from '../services/pdfService';
 import { systemLog } from '../services/logger';
 import { PersistenceService } from '../services/persistence';
+import { HistoryService } from '../services/history';
 import SafeIcon from '../common/SafeIcon';
 
-const MarkdownComponents = {
+// ---------------------------------------------------------------------------
+// Markdown renderer config
+// ---------------------------------------------------------------------------
+const MD = {
   h1: ({ children }) => (
-    <h1 className="text-3xl font-black text-white mb-8 border-b-2 border-blue-600 pb-4 tracking-tighter uppercase">
-      {children}
-    </h1>
+    <h1 className="text-2xl font-bold text-white mb-6 pb-3 border-b border-slate-700">{children}</h1>
   ),
   h2: ({ children }) => (
-    <h2 className="text-xl font-bold text-white mt-12 mb-6 flex items-center gap-3 border-l-4 border-blue-600 pl-4 uppercase tracking-tight">
-      {children}
-    </h2>
+    <h2 className="text-lg font-semibold text-white mt-10 mb-4 flex items-center gap-2 border-l-4 border-blue-500 pl-3">{children}</h2>
   ),
   h3: ({ children }) => (
-    <h3 className="text-lg font-bold text-blue-400 mt-8 mb-4 uppercase tracking-wide">
-      {children}
-    </h3>
+    <h3 className="text-base font-semibold text-blue-400 mt-6 mb-3">{children}</h3>
   ),
   p: ({ children }) => (
-    <p className="text-neutral-300 leading-relaxed mb-6 text-sm md:text-base">
-      {children}
-    </p>
+    <p className="text-slate-300 leading-7 mb-5 text-sm">{children}</p>
   ),
   table: ({ children }) => (
-    <div className="my-8 overflow-x-auto rounded-lg border border-neutral-800">
-      <table className="w-full text-sm text-left border-collapse bg-black/20">
-        {children}
-      </table>
+    <div className="my-6 overflow-x-auto rounded-lg border border-slate-700">
+      <table className="w-full text-sm text-left border-collapse">{children}</table>
     </div>
   ),
-  thead: ({ children }) => <thead className="bg-neutral-900 text-white font-bold">{children}</thead>,
-  th: ({ children }) => <th className="p-4 border-b border-neutral-800">{children}</th>,
-  td: ({ children }) => <td className="p-4 border-b border-neutral-800 text-neutral-400">{children}</td>,
+  thead: ({ children }) => <thead className="bg-slate-800 text-slate-200">{children}</thead>,
+  th: ({ children }) => <th className="px-4 py-3 border-b border-slate-700 font-medium">{children}</th>,
+  td: ({ children }) => <td className="px-4 py-3 border-b border-slate-800 text-slate-400">{children}</td>,
   a: ({ children, href }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-400 underline underline-offset-4 font-medium">
+    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline underline-offset-2">
       {children}
     </a>
   ),
   code({ node, inline, className, children, ...props }) {
     const match = /language-(\w+)/.exec(className || '');
     return !inline && match ? (
-      <div className="my-6 rounded-lg overflow-hidden border border-neutral-800 shadow-2xl">
-        <SyntaxHighlighter style={vscDarkPlus} language={match[1]} PreTag="div" customStyle={{ margin: 0, padding: '1.5rem', fontSize: '13px' }} {...props} >
+      <div className="my-5 rounded-lg overflow-hidden border border-slate-700">
+        <SyntaxHighlighter style={vscDarkPlus} language={match[1]} PreTag="div" customStyle={{ margin: 0, padding: '1.25rem', fontSize: '12px' }} {...props}>
           {String(children).replace(/\n$/, '')}
         </SyntaxHighlighter>
       </div>
     ) : (
-      <code className="bg-neutral-800 text-blue-300 px-1.5 py-0.5 rounded font-mono text-sm" {...props}>
-        {children}
-      </code>
+      <code className="bg-slate-800 text-blue-300 px-1.5 py-0.5 rounded font-mono text-xs" {...props}>{children}</code>
     );
-  }
+  },
 };
 
+// ---------------------------------------------------------------------------
+// Small shared components
+// ---------------------------------------------------------------------------
+function LogPanel({ logs, title = 'Console' }) {
+  const [expanded, setExpanded] = useState(null);
+  const levelColor = { ERROR: 'text-red-400', WARN: 'text-amber-400', INFO: 'text-blue-400', DEBUG: 'text-slate-500' };
+
+  return (
+    <div className="flex flex-col h-full font-mono text-[11px]">
+      <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+        <span className="text-slate-400 font-semibold text-xs">{title}</span>
+        <span className="text-slate-600 text-[10px]">{logs.length} entries</span>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        {logs.length === 0 ? (
+          <p className="text-slate-700 italic text-center mt-8">No log entries yet</p>
+        ) : (
+          logs.map((log, i) => (
+            <div key={i} className="border-l-2 border-slate-800 pl-3 py-0.5 hover:bg-slate-900/50 cursor-pointer rounded-r" onClick={() => setExpanded(expanded === i ? null : i)}>
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className={`font-bold text-[10px] ${levelColor[log.level] || 'text-slate-400'}`}>{log.level}</span>
+                <span className="text-slate-700 tabular-nums">{log.timestamp.split('T')[1]?.slice(0, 8)}</span>
+                {log.data && <span className="text-[9px] text-slate-600">[{expanded === i ? '−' : '+'}]</span>}
+              </div>
+              <div className="text-slate-400 leading-relaxed whitespace-pre-wrap">{log.message}</div>
+              {expanded === i && log.data && (
+                <pre className="mt-2 p-2 bg-black/60 border border-slate-800 rounded text-blue-300 overflow-x-auto whitespace-pre-wrap text-[10px]">{log.data}</pre>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReportView({ markdown, onExport, isExporting }) {
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+      <div className="px-5 py-3 border-b border-slate-800 flex items-center justify-between bg-slate-900/80">
+        <div className="flex items-center gap-2">
+          <SafeIcon name="FileText" className="w-4 h-4 text-blue-400" />
+          <span className="text-sm font-medium text-slate-300">Generated Report</span>
+        </div>
+        <div className="flex items-center gap-4">
+          <button onClick={() => navigator.clipboard.writeText(markdown)} className="text-xs text-slate-500 hover:text-slate-300 transition-colors">
+            Copy Markdown
+          </button>
+          {onExport && (
+            <button onClick={onExport} disabled={isExporting} className="text-xs text-blue-400 hover:text-blue-300 disabled:text-slate-600 flex items-center gap-1.5 transition-colors">
+              <SafeIcon name={isExporting ? 'RefreshCcw' : 'Download'} className={`w-3 h-3 ${isExporting ? 'animate-spin' : ''}`} />
+              Export PDF
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="p-8">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD}>{markdown}</ReactMarkdown>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// History tab
+// ---------------------------------------------------------------------------
+function HistoryTab({ history, onDelete }) {
+  const [selected, setSelected] = useState(null);
+  const [view, setView] = useState('report');
+
+  const entry = history.find(h => h.id === selected);
+
+  if (selected && entry) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <button onClick={() => setSelected(null)} className="text-slate-400 hover:text-white flex items-center gap-1.5 text-sm transition-colors">
+            <SafeIcon name="ArrowLeft" className="w-4 h-4" /> Back to history
+          </button>
+        </div>
+
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <p className="text-slate-500 text-xs mb-1">{new Date(entry.date).toLocaleString()}</p>
+          <p className="text-white font-medium">{entry.query}</p>
+        </div>
+
+        <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-lg p-1 w-fit">
+          {['report', 'logs'].map(v => (
+            <button key={v} onClick={() => setView(v)} className={`px-4 py-1.5 rounded text-xs font-medium capitalize transition-colors ${view === v ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+              {v === 'logs' ? 'Console Log' : 'Report'}
+            </button>
+          ))}
+        </div>
+
+        {view === 'report' ? (
+          <ReportView markdown={entry.report} />
+        ) : (
+          <div className="bg-slate-950 border border-slate-800 rounded-xl h-[600px] overflow-hidden">
+            <LogPanel logs={entry.logs || []} title={`Console — ${entry.query.slice(0, 50)}…`} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold text-slate-200">Research History</h2>
+        {history.length > 0 && (
+          <button onClick={() => { HistoryService.clear(); onDelete(); }} className="text-xs text-slate-600 hover:text-red-400 transition-colors">
+            Clear all
+          </button>
+        )}
+      </div>
+
+      {history.length === 0 ? (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
+          <SafeIcon name="Clock" className="w-8 h-8 text-slate-700 mx-auto mb-3" />
+          <p className="text-slate-500 text-sm">No past research runs yet.</p>
+          <p className="text-slate-600 text-xs mt-1">Completed reports will appear here.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {history.map(item => (
+            <div key={item.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center justify-between gap-4 hover:border-slate-700 transition-colors group">
+              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setSelected(item.id)}>
+                <p className="text-slate-200 text-sm font-medium truncate">{item.query}</p>
+                <p className="text-slate-600 text-xs mt-1">{new Date(item.date).toLocaleString()}</p>
+              </div>
+              <div className="flex items-center gap-3 flex-shrink-0">
+                <button onClick={() => setSelected(item.id)} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
+                  View
+                </button>
+                <button onClick={() => { HistoryService.remove(item.id); onDelete(); }} className="text-xs text-slate-700 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100">
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
 export default function CompilerUI() {
+  const [activeTab, setActiveTab] = useState('compiler');
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('idle');
   const [progressMsg, setProgressMsg] = useState('');
   const [report, setReport] = useState('');
   const [isExporting, setIsExporting] = useState(false);
   const [logs, setLogs] = useState([]);
-  const [showLogs, setShowLogs] = useState(false);
-  const [expandedLog, setExpandedLog] = useState(null);
+  const [showConsole, setShowConsole] = useState(false);
+  const [history, setHistory] = useState([]);
 
   useEffect(() => {
     const unsubscribe = systemLog.subscribe(setLogs);
+    setHistory(HistoryService.load());
     return () => unsubscribe();
   }, []);
+
+  const isRunning = ['translating', 'executing', 'synthesizing'].includes(status);
 
   const handleCompile = async () => {
     if (!query.trim()) return;
     setStatus('translating');
-    setProgressMsg('Step 1: Matrix Decomposition...');
+    setProgressMsg('Decomposing research query…');
     setReport('');
     systemLog.clear();
     PersistenceService.clear();
+
     try {
       const plan = await translateQuery(query);
       setStatus('executing');
-      const { database, sources } = await executePlan(plan, (msg) => {
-        setProgressMsg(msg);
-      });
+      const { database, sources } = await executePlan(plan, msg => setProgressMsg(msg));
       setStatus('synthesizing');
-      setProgressMsg('Step 3: Professional 1000-Word Synthesis...');
+      setProgressMsg('Synthesising report…');
       const finalReport = await generateProfessionalReport(database, sources);
       setReport(finalReport.markdown);
       setStatus('complete');
       setProgressMsg('');
+      HistoryService.save({ query, report: finalReport.markdown, logs: [...systemLog.logs] });
+      setHistory(HistoryService.load());
     } catch (err) {
       setStatus('error');
-      systemLog.error('Pipeline Halt', err.message);
-      setProgressMsg('Process interrupted: ' + err.message);
+      systemLog.error('Pipeline error', err.message);
+      setProgressMsg('Error: ' + err.message);
     }
   };
 
-  const handleDownloadPdf = async () => {
+  const handleExportPdf = async () => {
     if (!report) return;
     setIsExporting(true);
     try {
-      await exportToPdf(report, `Research_Report_${new Date().getTime()}.pdf`);
-      systemLog.info("PDF Report exported successfully");
+      await exportToPdf(report, `Research_Report_${Date.now()}.pdf`);
     } catch (err) {
-      systemLog.error("Export Failed", err.message);
+      systemLog.error('Export failed', err.message);
     } finally {
       setIsExporting(false);
     }
   };
 
+  const statusLabel = {
+    idle: 'Ready',
+    translating: 'Translating query…',
+    executing: 'Executing searches…',
+    synthesizing: 'Synthesising report…',
+    complete: 'Complete',
+    error: 'Error',
+  }[status] ?? status;
+
   return (
-    <div className="min-h-screen bg-[#050505] text-neutral-300 font-mono p-4 md:p-8">
-      <div className="max-w-7xl mx-auto space-y-6">
-        <header className="border-b border-neutral-800 pb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-600/20 rounded border border-blue-600/40">
-                <SafeIcon name="Terminal" className="text-blue-500 w-6 h-6" />
-              </div>
-              <h1 className="text-xl font-bold text-white tracking-tight uppercase"> Research Compiler <span className="text-blue-600">v2.1</span> </h1>
+    <div className="min-h-screen bg-slate-950 text-slate-300">
+      {/* Header */}
+      <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur sticky top-0 z-10">
+        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-1.5 bg-blue-600/20 rounded-lg border border-blue-600/30">
+              <SafeIcon name="Terminal" className="w-5 h-5 text-blue-400" />
             </div>
-            <p className="text-neutral-500 text-[10px] mt-2 uppercase tracking-[0.3em]"> Autonomous Matrix Execution • Professional Synthesis • PDF Export </p>
+            <div>
+              <span className="text-white font-semibold text-sm">Research Compiler</span>
+              <span className="text-blue-500 text-sm font-semibold ml-1.5">v2.1</span>
+            </div>
           </div>
-          <div className="flex gap-3">
-            <button onClick={() => setShowLogs(!showLogs)} className="text-[10px] font-bold text-neutral-500 border border-neutral-800 px-4 py-2 rounded hover:bg-neutral-900 transition-all uppercase tracking-widest" >
-              {showLogs ? 'Close Console' : 'Open Console'}
-            </button>
-          </div>
-        </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          <div className={`${showLogs ? 'lg:col-span-8' : 'lg:col-span-12'} space-y-6`}>
-            <section className="bg-neutral-900/40 border border-neutral-800 rounded-xl p-6 shadow-2xl">
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-[10px] font-black text-neutral-600 uppercase tracking-widest">Compiler Input</span>
-                {['translating', 'executing', 'synthesizing'].includes(status) && (
-                  <span className="flex items-center gap-2 text-[10px] font-bold text-blue-500 animate-pulse">
-                    <SafeIcon name="Activity" className="w-3 h-3" /> PIPELINE_ACTIVE
-                  </span>
+          {/* Tabs */}
+          <nav className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-lg p-1">
+            {[{ id: 'compiler', icon: 'Play', label: 'Compiler' }, { id: 'history', icon: 'Clock', label: 'History' }].map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-4 py-1.5 rounded text-xs font-medium transition-colors ${activeTab === tab.id ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                <SafeIcon name={tab.icon} className="w-3.5 h-3.5" />
+                {tab.label}
+                {tab.id === 'history' && history.length > 0 && (
+                  <span className="bg-slate-700 text-slate-300 text-[10px] px-1.5 py-0.5 rounded-full">{history.length}</span>
                 )}
-              </div>
-              <textarea className="w-full bg-black/40 border border-neutral-800 rounded-lg p-5 text-sm md:text-base focus:outline-none focus:border-blue-700 transition-all resize-y min-h-[140px] text-neutral-200 placeholder:text-neutral-700 leading-relaxed" placeholder="Enter research objective (e.g.,'Compare the water sustainability policies of Rio Tinto and BHP Group from 2023')" value={query} onChange={(e) => setQuery(e.target.value)} disabled={['translating', 'executing', 'synthesizing'].includes(status)} />
-              <div className="mt-6 flex flex-col md:flex-row justify-between items-center gap-4">
-                <div className="text-[10px] text-neutral-600 font-bold uppercase tracking-tighter">
-                  {status === 'complete' ? 'Process Finalized' : `Status: ${status}`}
-                </div>
-                <button onClick={handleCompile} disabled={['translating', 'executing', 'synthesizing'].includes(status) || !query.trim()} className="w-full md:w-auto bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-800 disabled:text-neutral-600 text-white px-10 py-3 rounded-lg text-xs font-black transition-all shadow-lg shadow-blue-900/20 flex items-center justify-center gap-3 uppercase tracking-tighter" >
-                  {['translating', 'executing', 'synthesizing'].includes(status) ? (
-                    <SafeIcon name="RefreshCcw" className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <SafeIcon name="Play" className="w-4 h-4" />
-                  )} Compile Research
-                </button>
-              </div>
-            </section>
+              </button>
+            ))}
+          </nav>
 
-            {['translating', 'executing', 'synthesizing'].includes(status) && (
-              <div className="bg-blue-600/5 border border-blue-600/20 rounded-xl p-5 flex items-center gap-5">
-                <div className="w-10 h-10 rounded-full border-2 border-blue-600/30 border-t-blue-600 animate-spin flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-[10px] font-black text-blue-500 uppercase tracking-[0.2em]">{status}</h3>
-                  <p className="text-sm text-neutral-400 mt-1 font-medium truncate">{progressMsg}</p>
-                </div>
-              </div>
-            )}
+          <button onClick={() => setShowConsole(v => !v)} className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border transition-colors ${showConsole ? 'border-blue-600/50 text-blue-400 bg-blue-600/10' : 'border-slate-800 text-slate-500 hover:text-white'}`}>
+            <SafeIcon name="Activity" className="w-3.5 h-3.5" />
+            Console
+            {logs.length > 0 && <span className="text-[10px] text-slate-600">{logs.length}</span>}
+          </button>
+        </div>
+      </header>
 
-            {report && (
-              <div className="bg-neutral-900/40 border border-neutral-800 rounded-xl overflow-hidden shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-700">
-                <div className="bg-neutral-800/30 px-6 py-4 border-b border-neutral-800 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <SafeIcon name="FileText" className="w-4 h-4 text-blue-500" />
-                    <h2 className="text-[10px] font-black text-neutral-300 uppercase tracking-[0.2em]">Synthesis_Output.md</h2>
-                  </div>
-                  <div className="flex gap-4">
-                    <button onClick={handleDownloadPdf} disabled={isExporting} className="text-[10px] text-blue-400 hover:text-blue-300 uppercase font-bold flex items-center gap-2 disabled:text-neutral-600" >
-                      {isExporting ? (
-                        <SafeIcon name="RefreshCcw" className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <SafeIcon name="Download" className="w-3 h-3" />
-                      )} Export PDF
-                    </button>
-                    <button onClick={() => navigator.clipboard.writeText(report)} className="text-[10px] text-neutral-500 hover:text-white uppercase font-bold" >
-                      Copy Markdown
+      {/* Body */}
+      <div className="max-w-6xl mx-auto px-6 py-8">
+        <div className={`grid gap-6 ${showConsole && activeTab === 'compiler' ? 'grid-cols-[1fr_360px]' : 'grid-cols-1'}`}>
+
+          {/* Main panel */}
+          <main className="space-y-6 min-w-0">
+            {activeTab === 'compiler' ? (
+              <>
+                {/* Input */}
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+                  <label className="block text-xs font-medium text-slate-500 mb-3 uppercase tracking-wider">Research Question</label>
+                  <textarea
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-4 text-sm text-slate-200 placeholder:text-slate-700 focus:outline-none focus:border-blue-600 transition-colors resize-y min-h-[120px] leading-relaxed"
+                    placeholder="e.g. Compare the water sustainability policies of Rio Tinto and BHP Group from 2023"
+                    value={query}
+                    onChange={e => setQuery(e.target.value)}
+                    disabled={isRunning}
+                  />
+                  <div className="mt-4 flex items-center justify-between">
+                    <span className="text-xs text-slate-600">{statusLabel}</span>
+                    <button
+                      onClick={handleCompile}
+                      disabled={isRunning || !query.trim()}
+                      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-600 text-white px-6 py-2 rounded-lg text-sm font-medium transition-colors"
+                    >
+                      <SafeIcon name={isRunning ? 'RefreshCcw' : 'Play'} className={`w-4 h-4 ${isRunning ? 'animate-spin' : ''}`} />
+                      {isRunning ? 'Running…' : 'Compile Research'}
                     </button>
                   </div>
                 </div>
-                <div className="p-8 max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={MarkdownComponents} >
-                    {report}
-                  </ReactMarkdown>
-                </div>
-              </div>
-            )}
-          </div>
 
-          {showLogs && (
-            <div className="lg:col-span-4 bg-black border border-neutral-800 rounded-xl flex flex-col h-[500px] lg:h-[calc(100vh-160px)] sticky top-8 shadow-2xl overflow-hidden text-neutral-500">
-              <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/20">
-                <div className="flex items-center gap-2">
-                  <div className={`w-2 h-2 rounded-full ${status === 'idle' ? 'bg-neutral-600' : 'bg-green-500 animate-pulse'}`} />
-                  <span className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">System Log</span>
-                </div>
-                <span className="text-[10px] text-neutral-600 uppercase font-bold">{logs.length} entries</span>
-              </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-3 font-mono text-[9px] scrollbar-hide">
-                {logs.length === 0 ? (
-                  <div className="h-full flex items-center justify-center text-neutral-800 italic uppercase">
-                    Awaiting System Activity...
-                  </div>
-                ) : (
-                  logs.map((log, idx) => (
-                    <div key={idx} className="border-l border-neutral-800 pl-3 py-1 cursor-pointer hover:bg-neutral-900/40 transition-colors" onClick={() => setExpandedLog(expandedLog === idx ? null : idx)}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className={`font-black ${log.level === 'ERROR' ? 'text-red-500' : log.level === 'WARN' ? 'text-yellow-500' : log.level === 'INFO' ? 'text-blue-500' : 'text-neutral-600'}`}>{log.level}</span>
-                        <span className="text-neutral-700 tabular-nums">{log.timestamp.split('T')[1].slice(0, 8)}</span>
-                        {log.data && (
-                          <span className="text-[8px] bg-neutral-800 px-1 rounded text-neutral-500">{expandedLog === idx ? 'Collapse' : 'Expand'}</span>
-                        )}
-                      </div>
-                      <div className="text-neutral-400 leading-relaxed">{log.message}</div>
-                      {expandedLog === idx && log.data && (
-                        <pre className="mt-2 p-2 bg-black border border-neutral-800 rounded text-blue-400 overflow-x-auto whitespace-pre-wrap">
-                          {log.data}
-                        </pre>
-                      )}
+                {/* Progress */}
+                {isRunning && (
+                  <div className="bg-blue-600/5 border border-blue-600/20 rounded-xl p-4 flex items-center gap-4">
+                    <div className="w-8 h-8 rounded-full border-2 border-blue-600/30 border-t-blue-500 animate-spin flex-shrink-0" />
+                    <div>
+                      <p className="text-xs font-medium text-blue-400 uppercase tracking-wide">{status}</p>
+                      <p className="text-sm text-slate-400 mt-0.5">{progressMsg}</p>
                     </div>
-                  ))
+                  </div>
                 )}
-              </div>
-            </div>
+
+                {/* Error */}
+                {status === 'error' && (
+                  <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-4 flex items-center gap-3">
+                    <SafeIcon name="AlertCircle" className="w-5 h-5 text-red-400 flex-shrink-0" />
+                    <p className="text-sm text-red-300">{progressMsg}</p>
+                  </div>
+                )}
+
+                {/* Report */}
+                {report && (
+                  <ReportView markdown={report} onExport={handleExportPdf} isExporting={isExporting} />
+                )}
+              </>
+            ) : (
+              <HistoryTab history={history} onDelete={() => setHistory(HistoryService.load())} />
+            )}
+          </main>
+
+          {/* Console panel — only shown in compiler tab */}
+          {showConsole && activeTab === 'compiler' && (
+            <aside className="bg-slate-950 border border-slate-800 rounded-xl h-[calc(100vh-120px)] sticky top-[73px] overflow-hidden">
+              <LogPanel logs={logs} title={`Console · ${status}`} />
+            </aside>
           )}
         </div>
       </div>
