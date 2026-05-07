@@ -221,10 +221,12 @@ export default function CompilerUI() {
     return () => unsubscribe();
   }, []);
 
+  const [runMode, setRunMode] = useState(null);
   const isRunning = ['translating', 'executing', 'synthesizing'].includes(status);
 
-  const handleCompile = async () => {
+  const handleCompile = async (mode) => {
     if (!query.trim()) return;
+    setRunMode(mode);
     setStatus('translating');
     setProgressMsg('Decomposing research query…');
     setReport('');
@@ -234,17 +236,19 @@ export default function CompilerUI() {
     try {
       const plan = await translateQuery(query);
       setStatus('executing');
-      const { database, sources } = await executePlan(plan, msg => setProgressMsg(msg));
+      const { database, sources } = await executePlan(plan, msg => setProgressMsg(msg), mode);
       setStatus('synthesizing');
       setProgressMsg('Synthesising report…');
-      const finalReport = await generateProfessionalReport(database, sources);
+      const finalReport = await generateProfessionalReport(database, sources, mode);
       setReport(finalReport.markdown);
       setStatus('complete');
       setProgressMsg('');
+      setRunMode(null);
       HistoryService.save({ query, report: finalReport.markdown, logs: [...systemLog.logs] });
       setHistory(HistoryService.load());
     } catch (err) {
       setStatus('error');
+      setRunMode(null);
       systemLog.error('Pipeline error', err.message);
       setProgressMsg('Error: ' + err.message);
     }
@@ -327,14 +331,24 @@ export default function CompilerUI() {
                   />
                   <div className="mt-4 flex items-center justify-between">
                     <span className="text-xs text-slate-600">{statusLabel}</span>
-                    <button
-                      onClick={handleCompile}
-                      disabled={isRunning || !query.trim()}
-                      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-600 text-white px-6 py-2 rounded-lg text-sm font-medium transition-colors"
-                    >
-                      <SafeIcon name={isRunning ? 'RefreshCcw' : 'Play'} className={`w-4 h-4 ${isRunning ? 'animate-spin' : ''}`} />
-                      {isRunning ? 'Running…' : 'Compile Research'}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleCompile('brief')}
+                        disabled={isRunning || !query.trim()}
+                        className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-600 text-slate-200 px-5 py-2 rounded-lg text-sm font-medium transition-colors"
+                      >
+                        <SafeIcon name={isRunning && runMode === 'brief' ? 'RefreshCcw' : 'Zap'} className={`w-4 h-4 ${isRunning && runMode === 'brief' ? 'animate-spin' : ''}`} />
+                        {isRunning && runMode === 'brief' ? 'Running…' : 'Brief Research Overview'}
+                      </button>
+                      <button
+                        onClick={() => handleCompile('deep')}
+                        disabled={isRunning || !query.trim()}
+                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-600 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors"
+                      >
+                        <SafeIcon name={isRunning && runMode === 'deep' ? 'RefreshCcw' : 'Play'} className={`w-4 h-4 ${isRunning && runMode === 'deep' ? 'animate-spin' : ''}`} />
+                        {isRunning && runMode === 'deep' ? 'Running…' : 'Deep Research Report'}
+                      </button>
+                    </div>
                   </div>
                 </div>
 

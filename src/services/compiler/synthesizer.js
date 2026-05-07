@@ -1,7 +1,7 @@
 import { callLLM } from '../api';
 import { systemLog } from '../logger';
 
-export async function generateProfessionalReport(rawData, sources) {
+export async function generateProfessionalReport(rawData, sources, mode = 'deep') {
   systemLog.info("PART 5: Enhanced Report Synthesis Initialized");
 
   if (!rawData || rawData.length === 0) {
@@ -14,9 +14,12 @@ export async function generateProfessionalReport(rawData, sources) {
   const subQuestions = [...new Set(rawData.filter(d => d.question !== 'Authority Overview').map(d => d.question))];
 
   // Dynamic minimum: whichever rule produces the largest number wins
-  const minFromSubQuestions = subQuestions.length * 200;
-  const minFromEntities = entities.length * 500;
-  const minimumWords = Math.max(1000, minFromSubQuestions, minFromEntities);
+  const sqMultiplier = mode === 'brief' ? 100 : 200;
+  const entityMultiplier = mode === 'brief' ? 250 : 500;
+  const wordFloor = mode === 'brief' ? 500 : 1000;
+  const minFromSubQuestions = subQuestions.length * sqMultiplier;
+  const minFromEntities = entities.length * entityMultiplier;
+  const minimumWords = Math.max(wordFloor, minFromSubQuestions, minFromEntities);
 
   systemLog.info("📊 SYNTHESIS INPUT", {
     entities: entities.length,
@@ -36,10 +39,13 @@ export async function generateProfessionalReport(rawData, sources) {
   const sourceList = numberedSources.map(s => s.label).join('\n');
 
   // Build per-entity section scaffold with sub-questions listed
+  const entityMinWords = mode === 'brief' ? 250 : 500;
+  const sqMinWords = mode === 'brief' ? 100 : 200;
+
   const entitySections = entities.map(name => {
     const sqs = rawData.filter(d => d.entity === name && d.question !== 'Authority Overview').map(d => d.question);
     const sqList = [...new Set(sqs)].map(q => `  - ${q}`).join('\n');
-    return `## ${name} (minimum 500 words)\n${sqList ? `Sub-questions covered:\n${sqList}` : ''}
+    return `## ${name} (minimum ${entityMinWords} words)\n${sqList ? `Sub-questions covered:\n${sqList}` : ''}
 ### Key Findings
 ### Strategies & Approaches
 ### Quantitative Data & Metrics
@@ -47,7 +53,7 @@ export async function generateProfessionalReport(rawData, sources) {
   }).join('\n\n');
 
   const entityRequirements = entities.map((name, i) =>
-    `${i + 1}. ${name} — minimum 500 words, cite every relevant source`
+    `${i + 1}. ${name} — minimum ${entityMinWords} words, cite every relevant source`
   ).join('\n');
 
   const detailedPrompt = `You are writing a professional research report. Your job is to synthesize the research data below into a comprehensive, well-cited report.
@@ -68,9 +74,9 @@ RESEARCH DATA:
 ${JSON.stringify(rawData, null, 2)}
 
 WORD COUNT REQUIREMENTS:
-- Minimum ${minimumWords} words total (calculated from: ${subQuestions.length} sub-questions × 200 = ${minFromSubQuestions} words; ${entities.length} entities × 500 = ${minFromEntities} words; floor of 1000)
-- Minimum 200 words per sub-question addressed
-- Minimum 500 words per entity section
+- Minimum ${minimumWords} words total (calculated from: ${subQuestions.length} sub-questions × ${sqMultiplier} = ${minFromSubQuestions} words; ${entities.length} entities × ${entityMultiplier} = ${minFromEntities} words; floor of ${wordFloor})
+- Minimum ${sqMinWords} words per sub-question addressed
+- Minimum ${entityMinWords} words per entity section
 - Do NOT pad with filler — if you reach the minimum, keep going with substance
 
 REQUIRED STRUCTURE:
