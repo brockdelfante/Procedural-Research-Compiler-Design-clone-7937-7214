@@ -48,15 +48,15 @@ export async function searchTavily(query) {
 }
 
 export async function fetchWithJina(url) {
-  const response = await fetch(`https://r.jina.ai/${encodeURIComponent(url)}`, {
+  const headers = { 'X-Return-Format': 'text' };
+  if (JINA_API_KEY) headers['Authorization'] = `Bearer ${JINA_API_KEY}`;
+
+  // Jina Reader expects the target URL appended literally, not percent-encoded
+  const response = await fetch(`https://r.jina.ai/${url}`, {
     method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${JINA_API_KEY}`,
-      'Accept': 'application/json'
-    }
+    headers
   });
 
   if (!response.ok) throw new Error(`Jina API Error: ${response.status}`);
-  const text = await response.text();
-  return text;
+  return response.text();
 }
