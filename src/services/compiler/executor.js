@@ -53,7 +53,7 @@ function generateQueries(tier, entity, coreTask, question) {
   return [...new Set(queries)];
 }
 
-async function researchSubQuestion(entity, question, coreTask, uniqueSources, onProgress) {
+async function researchSubQuestion(entity, question, coreTask, uniqueSources, onProgress, mode = 'deep') {
   let sourcesCount = 0;
   let authorityHits = 0;
   let accumulatedKnowledge = "";
@@ -65,7 +65,7 @@ async function researchSubQuestion(entity, question, coreTask, uniqueSources, on
   const firstSynonym = entity.synonyms?.[0];
   const tier0Queries = [
     ...TIER0_ENTITY_TEMPLATES.map(t => t(entity.name, question)),
-    ...(firstSynonym ? [TIER0_SYNONYM_TEMPLATE(firstSynonym, question)] : []),
+    ...(firstSynonym && mode !== 'brief' ? [TIER0_SYNONYM_TEMPLATE(firstSynonym, question)] : []),
   ];
 
   for (const query of tier0Queries) {
@@ -94,6 +94,11 @@ async function researchSubQuestion(entity, question, coreTask, uniqueSources, on
   }
 
   // --- Decision: was Tier 0 sufficient? ---
+  if (mode === 'brief') {
+    systemLog.info(`    ℹ️ Brief mode — stopping after Tier 0`);
+    return { knowledge: accumulatedKnowledge, hasAuthority: authorityHits > 0 };
+  }
+
   if (authorityHits >= MIN_AUTHORITY_HITS_PER_QUESTION) {
     systemLog.info(`    ✅ Sufficient authority coverage (${authorityHits} hits) — skipping Tiers 1–4`);
     return { knowledge: accumulatedKnowledge, hasAuthority: true };
@@ -133,7 +138,7 @@ async function researchSubQuestion(entity, question, coreTask, uniqueSources, on
   return { knowledge: accumulatedKnowledge, hasAuthority: authorityHits > 0 };
 }
 
-export async function executePlan(plan, onProgress) {
+export async function executePlan(plan, onProgress, mode = 'deep') {
   systemLog.info("PART 2: Authority-First Matrix Executor");
   const localDatabase = [];
   const uniqueSources = new Map();
@@ -147,11 +152,12 @@ export async function executePlan(plan, onProgress) {
       continue;
     }
 
-    for (const question of sqGroup.questions) {
+    const questions = mode === 'brief' ? sqGroup.questions.slice(0, 2) : sqGroup.questions;
+    for (const question of questions) {
       systemLog.info(`  Sub-question: ${question}`);
 
       const { knowledge, hasAuthority } = await researchSubQuestion(
-        entity, question, plan.core_task, uniqueSources, onProgress
+        entity, question, plan.core_task, uniqueSources, onProgress, mode
       );
 
       if (knowledge) {
