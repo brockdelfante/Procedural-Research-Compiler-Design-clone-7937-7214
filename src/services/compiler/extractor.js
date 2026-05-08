@@ -46,10 +46,22 @@ Return ONLY a JSON object:
 /**
  * Part 3: The Extractor - Now with multi-factor validation
  */
-export async function extractData(url, question, sourceCount) {
+export async function extractData(url, question, sourceCount, tavilyContent = null) {
   try {
-    systemLog.debug(`Fetching: ${url}`);
-    const rawContent = await fetchWithDiffbot(url);
+    const isPdf = /\.pdf(\?|#|$)/i.test(url);
+    let rawContent;
+
+    if (isPdf) {
+      systemLog.debug(`PDF — Diffbot: ${url}`);
+      rawContent = await fetchWithDiffbot(url);
+    } else if (tavilyContent) {
+      systemLog.debug(`Tavily content: ${url}`);
+      rawContent = tavilyContent;
+    } else {
+      systemLog.debug(`Fallback Diffbot: ${url}`);
+      rawContent = await fetchWithDiffbot(url);
+    }
+
     const truncatedContent = rawContent.substring(0, 18000);
 
     // 1. Evaluate Gain First

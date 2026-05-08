@@ -78,7 +78,7 @@ async function researchSubQuestion(entity, question, coreTask, uniqueSources, on
 
       for (const result of results.slice(0, 2)) {
         if (uniqueSources.has(result.url)) continue;
-        const { content, evaluation } = await extractData(result.url, question, sourcesCount);
+        const { content, evaluation } = await extractData(result.url, question, sourcesCount, result.raw_content);
 
         if (content && (evaluation.sufficient || evaluation.score >= 6)) {
           authorityHits++;
@@ -122,7 +122,7 @@ async function researchSubQuestion(entity, question, coreTask, uniqueSources, on
 
         for (const result of results.slice(0, 2)) {
           if (uniqueSources.has(result.url)) continue;
-          const { content } = await extractData(result.url, question, sourcesCount);
+          const { content } = await extractData(result.url, question, sourcesCount, result.raw_content);
           if (content) {
             accumulatedKnowledge += `\n\n${content}`;
             uniqueSources.set(result.url, { title: result.title, url: result.url, isAuthority: false });

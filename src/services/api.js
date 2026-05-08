@@ -38,6 +38,7 @@ export async function searchTavily(query) {
       query: query,
       search_depth: "basic",
       include_answer: false,
+      include_raw_content: true,
       max_results: 10
     })
   });
