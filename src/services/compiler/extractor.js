@@ -1,4 +1,4 @@
-import { fetchWithJina, callLLM } from '../api';
+import { fetchWithDiffbot, callLLM } from '../api';
 import { systemLog } from '../logger';
 
 /**
@@ -49,7 +49,7 @@ Return ONLY a JSON object:
 export async function extractData(url, question, sourceCount) {
   try {
     systemLog.debug(`Fetching: ${url}`);
-    const rawContent = await fetchWithJina(url);
+    const rawContent = await fetchWithDiffbot(url);
     const truncatedContent = rawContent.substring(0, 18000);
 
     // 1. Evaluate Gain First

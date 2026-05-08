@@ -1,6 +1,6 @@
 const OPENROUTER_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
 const TAVILY_API_KEY = import.meta.env.VITE_TAVILY_API_KEY;
-const JINA_API_KEY = import.meta.env.VITE_JINA_API_KEY;
+const DIFFBOT_API_KEY = import.meta.env.VITE_DIFFBOT_API_KEY;
 
 export async function callLLM(systemPrompt, userPrompt, jsonMode = false) {
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -47,16 +47,14 @@ export async function searchTavily(query) {
   return data.results || [];
 }
 
-export async function fetchWithJina(url) {
-  const response = await fetch(`https://r.jina.ai/${encodeURIComponent(url)}`, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${JINA_API_KEY}`,
-      'Accept': 'application/json'
-    }
-  });
+export async function fetchWithDiffbot(url) {
+  const endpoint = `https://api.diffbot.com/v3/article?token=${DIFFBOT_API_KEY}&url=${encodeURIComponent(url)}`;
+  const response = await fetch(endpoint, { method: 'GET' });
 
-  if (!response.ok) throw new Error(`Jina API Error: ${response.status}`);
-  const text = await response.text();
-  return text;
+  if (!response.ok) throw new Error(`Diffbot API Error: ${response.status}`);
+  const data = await response.json();
+  const obj = data.objects?.[0];
+  if (!obj) throw new Error('Diffbot returned no content');
+  // Prefer plain text; fall back to stripped HTML summary
+  return obj.text || obj.html || '';
 }
